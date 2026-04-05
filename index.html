@@ -87,60 +87,79 @@
         const rightF = createFlipper(285, 505, 'right');
         Composite.add(world, [leftF.body, leftF.pivot, rightF.body, rightF.pivot]);
 
-        // --- 6. LOGIQUE DE JEU ---
+                // --- 6. LOGIQUE DE JEU ET ÉTATS ---
         let score = 0;
         let isGameOver = false;
 
-        const flip = (f) => {
-            // On utilise une vitesse angulaire directe plutôt qu'une force
-            // C'est beaucoup plus efficace pour stopper une bille rapide
-            Body.setAngularVelocity(f.body, f.side === 'left' ? -0.5 : 0.5);
-            const forceY = -2.5; 
-            const offset = f.side === 'left' ? 60 : -60;
-            Body.applyForce(f.body, { x: f.body.position.x + offset, y: f.body.position.y }, { x: 0, y: forceY });
+        // "Secret" : On stocke l'état d'activité pour le rebond forcé
+        const leftFlipperState = { active: false, lastHit: 0 };
+        const rightFlipperState = { active: false, lastHit: 0 };
+
+        // --- FRAISSE "MURS RÉACTIFS" ---
+        const flip = (f, state) => {
+            if (isGameOver) return;
+            
+            // On désactive la physique des flippers pour une fraction de seconde
+            // pour qu'ils ne se laissent pas traverser lors du mouvement
+            Body.setStatic(f.body, false);
+            
+            // 1. Secret de frappe : Vitesse Angulaire Massive (clac sec)
+            Body.setAngularVelocity(f.body, f.side === 'left' ? -0.8 : 0.8);
+            
+            // On active l'état pour les collisions forcées
+            state.active = true;
+            state.lastHit = Date.now();
+            
+            // 2. On désactive l'état après 150ms pour le repos
+            setTimeout(() => { state.active = false; }, 150);
         };
 
         window.addEventListener('touchstart', (e) => {
             e.preventDefault();
             const touchX = e.touches[0].clientX;
-            if (touchX < window.innerWidth / 2) flip(leftF);
-            else flip(rightF);
+            if (touchX < window.innerWidth / 2) flip(leftF, leftFlipperState);
+            else flip(rightF, rightFlipperState);
         }, { passive: false });
 
-        // COLLISIONS (Score & Anti-traversée Bumper)
+        // --- COLLISIONS FORCÉES (ANTI-TRAVERSÉE) ---
         Events.on(engine, 'collisionStart', (event) => {
             if (isGameOver) return;
             event.pairs.forEach((pair) => {
-                if (pair.bodyA.label === 'bumper' || pair.bodyB.label === 'bumper') {
-                    const bumper = pair.bodyA.label === 'bumper' ? pair.bodyA : pair.bodyB;
+                const bodyA = pair.bodyA;
+                const bodyB = pair.bodyB;
+
+                // 1. REBOND BUMPER (Score + Rebond forcé)
+                if (bodyA.label === 'bumper' || bodyB.label === 'bumper') {
                     score += 100;
                     document.getElementById('score').innerText = `SCORE: ${score.toString().padStart(4, '0')}`;
-                    
-                    const diff = Vector.sub(ball.position, bumper.position);
-                    const drift = (Math.random() - 0.5) * 2;
-                    const boost = Vector.mult(Vector.normalise({ x: diff.x + drift, y: diff.y }), 15);
-                    Body.setVelocity(ball, boost);
+                    const bumper = bodyA.label === 'bumper' ? bodyA : bodyB;
+                    const boostDir = Vector.normalise(Vector.sub(ball.position, bumper.position));
+                    Body.setVelocity(ball, Vector.mult(boostDir, 15)); // Expulsion immédiate
+                }
+
+                // 2. REBOND FLIPPER (Si actif lors de l'impact, on expulse la bille)
+                if ((bodyA.label === 'flipper' && pair.id.includes(leftF.body.id) && leftFlipperState.active) || 
+                    (bodyB.label === 'flipper' && pair.id.includes(leftF.body.id) && leftFlipperState.active)) {
+                        Body.setVelocity(ball, { x: ball.velocity.x, y: -25 }); // Projection massive vers le haut
+                }
+                if ((bodyA.label === 'flipper' && pair.id.includes(rightF.body.id) && rightFlipperState.active) || 
+                    (bodyB.label === 'flipper' && pair.id.includes(rightF.body.id) && rightFlipperState.active)) {
+                        Body.setVelocity(ball, { x: ball.velocity.x, y: -25 }); // Projection massive vers le haut
                 }
             });
         });
 
-        // BOUCLE DE MISE À JOUR
+        // --- BOUCLE DE MISE À JOUR ---
         Events.on(engine, 'beforeUpdate', () => {
-            // Retour forcé des flippers (Ressort puissant)
+            // Retour des flippers (ressort puissant)
             Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.5);
             Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.5);
             
-            // Limitation stricte des angles
+            // Sécurité angles de repos
             if (leftF.body.angle > 0.4) Body.setAngle(leftF.body, 0.4);
             if (rightF.body.angle < -0.4) Body.setAngle(rightF.body, -0.4);
 
-            // SÉCURITÉ ANTI-TRAVERSÉE FLIPPERS
-            // Si la bille s'approche trop des flips à grande vitesse, on réduit sa vélocité max
-            if (ball.velocity.y > 15) {
-                Body.setVelocity(ball, { x: ball.velocity.x, y: 15 });
-            }
-
-            // GESTION PERTE
+            // GESTION PERTE ET GAME OVER
             if (ball.position.y > 620 && !isGameOver) {
                 isGameOver = true;
                 alert("GAME OVER ! Score : " + score);
@@ -148,7 +167,7 @@
                 document.getElementById('score').innerText = `SCORE: 0000`;
                 Body.setPosition(ball, { x: 190, y: 50 });
                 Body.setVelocity(ball, { x: 0, y: 0 });
-                setTimeout(() => { isGameOver = false; }, 1000);
+                setTimeout(() => { isGameOver = false; }, 800);
             }
         });
 
