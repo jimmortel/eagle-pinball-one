@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Eagle Pinball One - Fixed</title>
+    <title>Eagle Pinball One - Pro Edition</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; touch-action: none; }
@@ -14,10 +14,13 @@
 <body>
     <div id="score">SCORE: 0000</div>
     <script>
-                const { Engine, Render, Runner, Bodies, Composite, Constraint, Events, Body } = Matter;
-        const engine = Engine.create();
+        const { Engine, Render, Runner, Bodies, Composite, Constraint, Events, Body } = Matter;
+        const engine = Engine.create({ 
+            enableSleeping: false,
+            positionIterations: 10 // Augmente la précision des collisions
+        });
         const world = engine.world;
-        world.gravity.y = 1.5;
+        world.gravity.y = 1.6;
 
         const render = Render.create({
             element: document.body,
@@ -25,51 +28,63 @@
             options: { width: 380, height: 580, wireframes: false, background: '#050505' }
         });
 
-        // --- STRUCTURE ---
+        // --- STRUCTURE (RAMPES AJUSTÉES) ---
         const wallStyle = { isStatic: true, render: { fillStyle: '#00ff41' } };
         Composite.add(world, [
-            Bodies.rectangle(190, 0, 380, 20, wallStyle),
-            Bodies.rectangle(0, 290, 20, 580, wallStyle),
-            Bodies.rectangle(380, 290, 20, 580, wallStyle),
-            Bodies.rectangle(45, 540, 120, 20, { isStatic: true, angle: 0.7, render: { fillStyle: '#00ff41' } }),
-            Bodies.rectangle(335, 540, 120, 20, { isStatic: true, angle: -0.7, render: { fillStyle: '#00ff41' } })
+            Bodies.rectangle(190, 0, 380, 20, wallStyle), // Haut
+            Bodies.rectangle(0, 290, 20, 580, wallStyle),   // Gauche
+            Bodies.rectangle(380, 290, 20, 580, wallStyle),  // Droite
+            // Rampes qui bloquent l'accès "derrière" les flips
+            Bodies.rectangle(40, 560, 140, 30, { isStatic: true, angle: 0.6, render: { fillStyle: '#00ff41' } }),
+            Bodies.rectangle(340, 560, 140, 30, { isStatic: true, angle: -0.6, render: { fillStyle: '#00ff41' } })
         ]);
 
-        // --- BUMPERS (Avec sursaut anti-blocage) ---
+        // --- CAPTEUR DE PERTE (EN BAS) ---
+        const lossSensor = Bodies.rectangle(190, 600, 400, 20, { isStatic: true, isSensor: true, render: { visible: false } });
+        Composite.add(world, lossSensor);
+
+        // --- BUMPERS ---
         const createBumper = (x, y) => {
             let b = Bodies.circle(x, y, 25, { isStatic: true, restitution: 2.5, render: { fillStyle: '#053a10', strokeStyle: '#00ff41', lineWidth: 4 } });
             b.label = "bumper";
             return b;
         };
-        const bumpers = [createBumper(100, 160), createBumper(280, 160), createBumper(190, 260)];
-        Composite.add(world, bumpers);
+        Composite.add(world, [createBumper(100, 160), createBumper(280, 160), createBumper(190, 260)]);
 
-        // --- LA BILLE ---
-        const ball = Bodies.circle(195, 50, 12, { restitution: 0.5, friction: 0, density: 0.01, render: { fillStyle: '#fff' } });
+        // --- LA BILLE (PLUS GROSSE POUR ÉVITER LES TUNNELS) ---
+        let ball = Bodies.circle(190, 50, 14, { 
+            restitution: 0.5, 
+            friction: 0, 
+            density: 0.02, 
+            render: { fillStyle: '#fff' },
+            label: 'ball'
+        });
         Composite.add(world, ball);
 
-        // --- FLIPPERS RECTIFIÉS ---
+        // --- FLIPPERS (PLUS ÉPAIS ET POSITIONNÉS) ---
         const createFlipper = (x, y, side) => {
             const isLeft = side === 'left';
-            const flipper = Bodies.rectangle(x, y, 90, 20, { chamfer: { radius: 10 }, render: { fillStyle: '#00ff41' } });
+            const flipper = Bodies.rectangle(x, y, 100, 25, { // Plus long et plus épais
+                chamfer: { radius: 12 },
+                render: { fillStyle: '#00ff41' }
+            });
             const pivot = Constraint.create({
                 bodyB: flipper, 
-                pointB: { x: isLeft ? -40 : 40, y: 0 },
+                pointB: { x: isLeft ? -45 : 45, y: 0 },
                 pointA: { x: x, y: y }, 
                 stiffness: 1, length: 0, render: { visible: false }
             });
             return { body: flipper, pivot: pivot, side: side };
         };
 
-        const leftF = createFlipper(110, 520, 'left');
-        const rightF = createFlipper(270, 520, 'right');
+        const leftF = createFlipper(105, 510, 'left');
+        const rightF = createFlipper(275, 510, 'right');
         Composite.add(world, [leftF.body, leftF.pivot, rightF.body, rightF.pivot]);
 
-        // --- MÉCANIQUE DE FRAPPE (CORRECTION DROITE) ---
+        // --- MÉCANIQUE DE FRAPPE ---
         const flip = (f) => {
-            // Force négative (vers le haut) pour les deux, mais appliquée sur le bout opposé au pivot
-            const force = -0.35; 
-            const offset = f.side === 'left' ? 40 : -40; // On pousse sur l'extrémité libre
+            const force = -0.5; // Force de frappe augmentée
+            const offset = f.side === 'left' ? 45 : -45;
             Body.applyForce(f.body, { x: f.body.position.x + offset, y: f.body.position.y }, { x: 0, y: force });
         };
 
@@ -80,25 +95,33 @@
             else flip(rightF);
         }, { passive: false });
 
-        // --- ANGLES ET RESSORTS (ANTI-INVERSION) ---
+        // --- ANGLES ET AUTO-RAPPEL ---
         Events.on(engine, 'beforeUpdate', () => {
-            // Gauche : Repos 0.4 (bas), Frappe -0.6 (haut)
             if (leftF.body.angle > 0.4) Body.setAngle(leftF.body, 0.4);
             if (leftF.body.angle < -0.6) Body.setAngle(leftF.body, -0.6);
-            Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.25);
+            Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.3);
 
-            // Droite : Repos -0.4 (bas), Frappe 0.6 (haut)
             if (rightF.body.angle < -0.4) Body.setAngle(rightF.body, -0.4);
             if (rightF.body.angle > 0.6) Body.setAngle(rightF.body, 0.6);
-            Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.25);
+            Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.3);
         });
 
-        // --- SCORE & ANTI-BLOCAGE ---
+        // --- COLLISIONS ET RESET ---
+        let score = 0;
         Events.on(engine, 'collisionStart', (event) => {
             event.pairs.forEach((pair) => {
+                // Si la balle touche le bumper
                 if (pair.bodyA.label === "bumper" || pair.bodyB.label === "bumper") {
-                    // Petite impulsion aléatoire pour que la balle ne reste jamais immobile
-                    Body.setVelocity(ball, { x: (Math.random() - 0.5) * 10, y: -10 });
+                    score += 100;
+                    document.getElementById('score').innerText = `SCORE: ${score.toString().padStart(4, '0')}`;
+                    Body.setVelocity(ball, { x: (Math.random() - 0.5) * 8, y: -12 });
+                }
+                // Si la balle tombe tout en bas (perdue)
+                if (pair.bodyA === lossSensor || pair.bodyB === lossSensor) {
+                    Body.setPosition(ball, { x: 190, y: 50 });
+                    Body.setVelocity(ball, { x: 0, y: 0 });
+                    score = 0; // Reset score pour le test
+                    document.getElementById('score').innerText = `SCORE: 0000`;
                 }
             });
         });
