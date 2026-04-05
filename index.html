@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Eagle Pinball - Super Precision</title>
+    <title>Eagle Pinball - Fix</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; touch-action: none; }
-        #score { color: #00ff41; font-family: monospace; font-size: 24px; padding: 10px; text-shadow: 0 0 10px #00ff41; }
-        canvas { border: 2px solid #00ff41; border-radius: 10px; }
+        #score { color: #00ff41; font-family: monospace; font-size: 24px; padding: 10px; }
     </style>
 </head>
 <body>
@@ -16,14 +15,9 @@
     <script>
         const { Engine, Render, Runner, Bodies, Composite, Constraint, Events, Body, Vector } = Matter;
         
-        // --- 1. PRÉCISION ULTIME ---
-        // On passe à 30 itérations de position pour éviter les "trous" physiques
-        const engine = Engine.create({ 
-            positionIterations: 30, 
-            velocityIterations: 30 
-        });
+        const engine = Engine.create({ positionIterations: 15 });
         const world = engine.world;
-        world.gravity.y = 1.5; // Gravité légèrement réduite pour plus de contrôle
+        world.gravity.y = 1.5;
 
         const render = Render.create({
             element: document.body,
@@ -31,143 +25,96 @@
             options: { width: 380, height: 580, wireframes: false, background: '#050505' }
         });
 
-        // --- 2. STRUCTURE ---
+        // MURS
         const wallStyle = { isStatic: true, render: { fillStyle: '#00ff41' } };
         Composite.add(world, [
-            Bodies.rectangle(190, 0, 380, 40, wallStyle), // Plafond épais
-            Bodies.rectangle(0, 290, 40, 580, wallStyle),  // Mur gauche épais
-            Bodies.rectangle(380, 290, 40, 580, wallStyle), // Mur droit épais
-            // Rampes de bas de plateau
+            Bodies.rectangle(190, 0, 380, 40, wallStyle),
+            Bodies.rectangle(0, 290, 40, 580, wallStyle),
+            Bodies.rectangle(380, 290, 40, 580, wallStyle),
             Bodies.rectangle(50, 570, 180, 50, { isStatic: true, angle: 0.5, render: { fillStyle: '#00ff41' } }),
             Bodies.rectangle(330, 570, 180, 50, { isStatic: true, angle: -0.5, render: { fillStyle: '#00ff41' } })
         ]);
 
-        // --- 3. BUMPERS ---
+        // BUMPERS (On enlève la restitution native pour éviter le ping-pong infini)
         const createBumper = (x, y) => {
-            let b = Bodies.circle(x, y, 18, { 
+            return Bodies.circle(x, y, 18, { 
                 isStatic: true, 
-                restitution: 1.5, 
+                label: "bumper",
                 render: { fillStyle: '#053a10', strokeStyle: '#00ff41', lineWidth: 3 } 
             });
-            b.label = "bumper";
-            return b;
         };
-        Composite.add(world, [createBumper(110, 140), createBumper(270, 140), createBumper(190, 240)]);
+        const bumpers = [createBumper(110, 140), createBumper(270, 140), createBumper(190, 240)];
+        Composite.add(world, bumpers);
 
-        // --- 4. LA BILLE (CCD - Continuous Collision Detection) ---
-        let ball = Bodies.circle(190, 50, 12, { 
-            restitution: 0.3, 
-            friction: 0, 
-            density: 0.5, // Plus lourde pour être mieux détectée
-            label: "ball",
-            slop: 0 // Élimine la tolérance de pénétration
-        });
+        // BILLE
+        let ball = Bodies.circle(190, 50, 11, { density: 0.5, label: "ball" });
         Composite.add(world, ball);
-
-        // --- 5. FLIPPERS "ARMURE" (Épais et resserrés) ---
+                // FLIPPERS
         const createFlipper = (x, y, side) => {
             const isLeft = side === 'left';
-            // 50px d'épaisseur pour stopper net la bille
-            const flipper = Bodies.rectangle(x, y, 125, 50, { 
-                chamfer: { radius: 15 }, 
-                render: { fillStyle: '#00ff41' },
-                label: 'flipper'
+            const f = Bodies.rectangle(x, y, 120, 45, { 
+                chamfer: { radius: 15 }, label: "flipper", render: { fillStyle: '#00ff41' } 
             });
-
-            const pivot = Constraint.create({
-                bodyB: flipper, 
-                pointB: { x: isLeft ? -50 : 50, y: 0 },
-                pointA: { x: x, y: y }, 
-                stiffness: 1, length: 0, render: { visible: false }
+            const p = Constraint.create({
+                bodyB: f, pointB: { x: isLeft ? -45 : 45, y: 0 },
+                pointA: { x: x, y: y }, stiffness: 1, length: 0, render: { visible: false }
             });
-            return { body: flipper, pivot: pivot, side: side };
+            return { body: f, pivot: p, side: side };
         };
 
-        const leftF = createFlipper(95, 505, 'left');
-        const rightF = createFlipper(285, 505, 'right');
+        const leftF = createFlipper(100, 505, 'left');
+        const rightF = createFlipper(280, 505, 'right');
         Composite.add(world, [leftF.body, leftF.pivot, rightF.body, rightF.pivot]);
 
-                // --- 6. LOGIQUE DE JEU ET ÉTATS ---
         let score = 0;
         let isGameOver = false;
 
-        // "Secret" : On stocke l'état d'activité pour le rebond forcé
-        const leftFlipperState = { active: false, lastHit: 0 };
-        const rightFlipperState = { active: false, lastHit: 0 };
-
-        // --- FRAISSE "MURS RÉACTIFS" ---
-        const flip = (f, state) => {
-            if (isGameOver) return;
-            
-            // On désactive la physique des flippers pour une fraction de seconde
-            // pour qu'ils ne se laissent pas traverser lors du mouvement
-            Body.setStatic(f.body, false);
-            
-            // 1. Secret de frappe : Vitesse Angulaire Massive (clac sec)
-            Body.setAngularVelocity(f.body, f.side === 'left' ? -0.8 : 0.8);
-            
-            // On active l'état pour les collisions forcées
-            state.active = true;
-            state.lastHit = Date.now();
-            
-            // 2. On désactive l'état après 150ms pour le repos
-            setTimeout(() => { state.active = false; }, 150);
+        // Action de frappe simplifiée (Vitesse directe)
+        const flip = (f) => {
+            Body.setAngularVelocity(f.body, f.side === 'left' ? -0.6 : 0.6);
         };
 
         window.addEventListener('touchstart', (e) => {
             e.preventDefault();
             const touchX = e.touches[0].clientX;
-            if (touchX < window.innerWidth / 2) flip(leftF, leftFlipperState);
-            else flip(rightF, rightFlipperState);
+            if (touchX < window.innerWidth / 2) flip(leftF);
+            else flip(rightF);
         }, { passive: false });
-
-        // --- COLLISIONS FORCÉES (ANTI-TRAVERSÉE) ---
+                // GESTION DES COLLISIONS (SCORE + EXPULSION)
         Events.on(engine, 'collisionStart', (event) => {
-            if (isGameOver) return;
             event.pairs.forEach((pair) => {
-                const bodyA = pair.bodyA;
-                const bodyB = pair.bodyB;
-
-                // 1. REBOND BUMPER (Score + Rebond forcé)
-                if (bodyA.label === 'bumper' || bodyB.label === 'bumper') {
+                if (pair.bodyA.label === "bumper" || pair.bodyB.label === "bumper") {
+                    const bumper = pair.bodyA.label === "bumper" ? pair.bodyA : pair.bodyB;
                     score += 100;
                     document.getElementById('score').innerText = `SCORE: ${score.toString().padStart(4, '0')}`;
-                    const bumper = bodyA.label === 'bumper' ? bodyA : bodyB;
-                    const boostDir = Vector.normalise(Vector.sub(ball.position, bumper.position));
-                    Body.setVelocity(ball, Vector.mult(boostDir, 15)); // Expulsion immédiate
-                }
-
-                // 2. REBOND FLIPPER (Si actif lors de l'impact, on expulse la bille)
-                if ((bodyA.label === 'flipper' && pair.id.includes(leftF.body.id) && leftFlipperState.active) || 
-                    (bodyB.label === 'flipper' && pair.id.includes(leftF.body.id) && leftFlipperState.active)) {
-                        Body.setVelocity(ball, { x: ball.velocity.x, y: -25 }); // Projection massive vers le haut
-                }
-                if ((bodyA.label === 'flipper' && pair.id.includes(rightF.body.id) && rightFlipperState.active) || 
-                    (bodyB.label === 'flipper' && pair.id.includes(rightF.body.id) && rightFlipperState.active)) {
-                        Body.setVelocity(ball, { x: ball.velocity.x, y: -25 }); // Projection massive vers le haut
+                    
+                    // Expulsion avec un angle aléatoire pour casser le ping-pong
+                    const diff = Vector.sub(ball.position, bumper.position);
+                    const randomDir = { x: diff.x + (Math.random() - 0.5) * 10, y: diff.y };
+                    Body.setVelocity(ball, Vector.mult(Vector.normalise(randomDir), 12));
                 }
             });
         });
 
-        // --- BOUCLE DE MISE À JOUR ---
+        // BOUCLE PRINCIPALE
         Events.on(engine, 'beforeUpdate', () => {
-            // Retour des flippers (ressort puissant)
-            Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.5);
-            Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.5);
+            // Ressort des flippers
+            Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.3);
+            Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.3);
             
-            // Sécurité angles de repos
+            // Limites d'angles
             if (leftF.body.angle > 0.4) Body.setAngle(leftF.body, 0.4);
             if (rightF.body.angle < -0.4) Body.setAngle(rightF.body, -0.4);
 
-            // GESTION PERTE ET GAME OVER
-            if (ball.position.y > 620 && !isGameOver) {
+            // Perte de bille
+            if (ball.position.y > 600 && !isGameOver) {
                 isGameOver = true;
-                alert("GAME OVER ! Score : " + score);
+                alert("Score : " + score);
                 score = 0;
-                document.getElementById('score').innerText = `SCORE: 0000`;
+                document.getElementById('score').innerText = "SCORE: 0000";
                 Body.setPosition(ball, { x: 190, y: 50 });
                 Body.setVelocity(ball, { x: 0, y: 0 });
-                setTimeout(() => { isGameOver = false; }, 800);
+                setTimeout(() => isGameOver = false, 1000);
             }
         });
 
