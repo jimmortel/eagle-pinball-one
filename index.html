@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Eagle Pinball - Fix</title>
+    <title>Eagle Pinball - Final Fix</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; touch-action: none; }
-        #score { color: #00ff41; font-family: monospace; font-size: 24px; padding: 10px; }
+        #score { color: #00ff41; font-family: monospace; font-size: 24px; padding: 10px; text-shadow: 0 0 10px #00ff41; }
+        canvas { border: 2px solid #00ff41; border-radius: 10px; }
     </style>
 </head>
 <body>
@@ -25,7 +26,7 @@
             options: { width: 380, height: 580, wireframes: false, background: '#050505' }
         });
 
-        // MURS
+        // --- STRUCTURE ---
         const wallStyle = { isStatic: true, render: { fillStyle: '#00ff41' } };
         Composite.add(world, [
             Bodies.rectangle(190, 0, 380, 40, wallStyle),
@@ -35,21 +36,28 @@
             Bodies.rectangle(330, 570, 180, 50, { isStatic: true, angle: -0.5, render: { fillStyle: '#00ff41' } })
         ]);
 
-        // BUMPERS (On enlève la restitution native pour éviter le ping-pong infini)
+        // --- BUMPERS (Correction du tremblement) ---
         const createBumper = (x, y) => {
             return Bodies.circle(x, y, 18, { 
                 isStatic: true, 
                 label: "bumper",
+                isSensor: false, // On le garde solide mais sans "restitution"
+                restitution: 0,  // On met le rebond à zéro pour stopper les vibrations
                 render: { fillStyle: '#053a10', strokeStyle: '#00ff41', lineWidth: 3 } 
             });
         };
         const bumpers = [createBumper(110, 140), createBumper(270, 140), createBumper(190, 240)];
         Composite.add(world, bumpers);
 
-        // BILLE
-        let ball = Bodies.circle(190, 50, 11, { density: 0.5, label: "ball" });
+        // --- BILLE ---
+        let ball = Bodies.circle(190, 50, 11, { 
+            density: 0.5, 
+            label: "ball",
+            frictionAir: 0.005 
+        });
         Composite.add(world, ball);
-                // FLIPPERS
+
+        // --- FLIPPERS ---
         const createFlipper = (x, y, side) => {
             const isLeft = side === 'left';
             const f = Bodies.rectangle(x, y, 120, 45, { 
@@ -69,9 +77,9 @@
         let score = 0;
         let isGameOver = false;
 
-        // Action de frappe simplifiée (Vitesse directe)
+        // --- LOGIQUE DE JEU ---
         const flip = (f) => {
-            Body.setAngularVelocity(f.body, f.side === 'left' ? -0.6 : 0.6);
+            Body.setAngularVelocity(f.body, f.side === 'left' ? -0.7 : 0.7);
         };
 
         window.addEventListener('touchstart', (e) => {
@@ -80,36 +88,42 @@
             if (touchX < window.innerWidth / 2) flip(leftF);
             else flip(rightF);
         }, { passive: false });
-                // GESTION DES COLLISIONS (SCORE + EXPULSION)
+
+        // --- GESTION UNIQUE DES COLLISIONS ---
         Events.on(engine, 'collisionStart', (event) => {
             event.pairs.forEach((pair) => {
+                // Collision avec un Bumper
                 if (pair.bodyA.label === "bumper" || pair.bodyB.label === "bumper") {
                     const bumper = pair.bodyA.label === "bumper" ? pair.bodyA : pair.bodyB;
-                    score += 100;
-                    document.getElementById('score').innerText = `SCORE: ${score.toString().padStart(4, '0')}`;
                     
-                    // Expulsion avec un angle aléatoire pour casser le ping-pong
-                    const diff = Vector.sub(ball.position, bumper.position);
-                    const randomDir = { x: diff.x + (Math.random() - 0.5) * 10, y: diff.y };
-                    Body.setVelocity(ball, Vector.mult(Vector.normalise(randomDir), 12));
+                    // On n'exécute le code que si la bille n'est pas déjà en train de rebondir
+                    if (ball.velocity.y < 15) { 
+                        score += 100;
+                        document.getElementById('score').innerText = `SCORE: ${score.toString().padStart(4, '0')}`;
+                        
+                        // Expulsion manuelle forcée pour casser le cycle infini
+                        const diff = Vector.sub(ball.position, bumper.position);
+                        const randomDrift = (Math.random() - 0.5) * 5; 
+                        const boost = Vector.mult(Vector.normalise({ x: diff.x + randomDrift, y: diff.y }), 14);
+                        Body.setVelocity(ball, boost);
+                    }
                 }
             });
         });
 
-        // BOUCLE PRINCIPALE
+        // --- MISE À JOUR ---
         Events.on(engine, 'beforeUpdate', () => {
-            // Ressort des flippers
-            Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.3);
-            Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.3);
+            // Ressort des flippers (plus ferme)
+            Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.35);
+            Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.35);
             
-            // Limites d'angles
             if (leftF.body.angle > 0.4) Body.setAngle(leftF.body, 0.4);
             if (rightF.body.angle < -0.4) Body.setAngle(rightF.body, -0.4);
 
             // Perte de bille
-            if (ball.position.y > 600 && !isGameOver) {
+            if (ball.position.y > 610 && !isGameOver) {
                 isGameOver = true;
-                alert("Score : " + score);
+                alert("GAME OVER ! Score : " + score);
                 score = 0;
                 document.getElementById('score').innerText = "SCORE: 0000";
                 Body.setPosition(ball, { x: 190, y: 50 });
