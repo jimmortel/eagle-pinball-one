@@ -57,30 +57,41 @@ Composite.add(world, [
     Bodies.rectangle(330, 570, 160, 40, { isStatic: true, angle: -0.5, render: { fillStyle: '#00ff41' } })
 ]);
 
-        // --- FLIPPERS ÉPAIS (Anti-traversée) ---
+                // --- FLIPPERS XXL (Bouchent les trous et anti-traversée) ---
         const createFlipper = (x, y, side) => {
             const isLeft = side === 'left';
-            const flipper = Bodies.rectangle(x, y, 110, 35, { 
-                chamfer: { radius: 10 }, 
-                render: { fillStyle: '#00ff41' } 
+            // On passe à 120 de longueur et 40 d'épaisseur pour être imbattable
+            const flipper = Bodies.rectangle(x, y, 120, 40, { 
+                chamfer: { radius: 15 }, 
+                render: { fillStyle: '#00ff41' },
+                label: 'flipper'
             });
+
             const pivot = Constraint.create({
                 bodyB: flipper, 
-                pointB: { x: isLeft ? -45 : 45, y: 0 },
+                pointB: { x: isLeft ? -50 : 50, y: 0 },
                 pointA: { x: x, y: y }, 
                 stiffness: 1, length: 0, render: { visible: false }
             });
             return { body: flipper, pivot: pivot, side: side };
         };
 
-        const leftF = createFlipper(100, 510, 'left');
-        const rightF = createFlipper(280, 510, 'right');
+        // Positions resserrées pour ne laisser que 80px de vide au centre
+        const leftF = createFlipper(90, 510, 'left');
+        const rightF = createFlipper(290, 510, 'right');
         Composite.add(world, [leftF.body, leftF.pivot, rightF.body, rightF.pivot]);
+
+        // --- ZONE DE RÉCUPÉRATION (Le filet de sécurité) ---
+        // Si la balle tombe vraiment, elle réapparaît en haut après 1 seconde
+        const resetBall = () => {
+            Body.setPosition(ball, { x: 190, y: 50 });
+            Body.setVelocity(ball, { x: 0, y: 0 });
+        };
 
         // --- LOGIQUE DE FRAPPE ---
         const flip = (f) => {
-            const force = -1.2; 
-            const offset = f.side === 'left' ? 50 : -50;
+            const force = -1.5; // Force de frappe pro
+            const offset = f.side === 'left' ? 60 : -60;
             Body.applyForce(f.body, { x: f.body.position.x + offset, y: f.body.position.y }, { x: 0, y: force });
         };
 
@@ -91,40 +102,26 @@ Composite.add(world, [
             else flip(rightF);
         }, { passive: false });
 
-        // --- MISE À JOUR ET ANTI-COLLAGE ---
+        // --- BOUCLE DE MISE À JOUR ---
         Events.on(engine, 'beforeUpdate', () => {
-            // Rappel des flips (ressort)
-            Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.35);
-            Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.35);
+            // Retour des flippers plus ferme
+            Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.4);
+            Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.4);
             
-            // Sécurité angles de repos
             if (leftF.body.angle > 0.4) Body.setAngle(leftF.body, 0.4);
             if (rightF.body.angle < -0.4) Body.setAngle(rightF.body, -0.4);
 
-            // Reset automatique si la bille tombe
-            if (ball.position.y > 600) {
-                Body.setPosition(ball, { x: 190, y: 50 });
-                Body.setVelocity(ball, { x: 0, y: 0 });
-            }
+            // Sécurité anti-perte : si la bille sort de l'écran
+            if (ball.position.y > 600) resetBall();
         });
 
-                // --- RÉPULSION FORCÉE (ADOUCIE ET DÉVIÉE) ---
+        // --- COLLISIONS ---
         Events.on(engine, 'collisionStart', (event) => {
             event.pairs.forEach((pair) => {
                 if (pair.bodyA.label === "bumper" || pair.bodyB.label === "bumper") {
                     const bumper = pair.bodyA.label === "bumper" ? pair.bodyA : pair.bodyB;
-                    
-                    // 1. On calcule la direction de base
                     const diff = Vector.sub(ball.position, bumper.position);
-                    const normalized = Vector.normalise(diff);
-                    
-                    // 2. On ajoute une petite déviation aléatoire (X) pour casser les boucles infinies
-                    const randomX = (Math.random() - 0.5) * 0.5;
-                    const finalDir = { x: normalized.x + randomX, y: normalized.y };
-                    
-                    // 3. Force réduite à 10 (au lieu de 15) pour plus de contrôle
-                    const boost = Vector.mult(Vector.normalise(finalDir), 10);
-                    
+                    const boost = Vector.mult(Vector.normalise(diff), 12);
                     Body.setVelocity(ball, boost);
                 }
             });
