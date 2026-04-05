@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Eagle Pinball - Final Edition</title>
+    <title>Eagle Pinball - Flipper Fix</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; touch-action: none; }
@@ -18,7 +18,7 @@
         
         const engine = Engine.create();
         const world = engine.world;
-        world.gravity.y = 1.4; // Gravité stable
+        world.gravity.y = 1.4;
 
         const render = Render.create({
             element: document.body,
@@ -26,7 +26,7 @@
             options: { width: 380, height: 580, wireframes: false, background: '#050505' }
         });
 
-        // --- MURS ---
+        // --- STRUCTURE ---
         const wallStyle = { isStatic: true, render: { fillStyle: '#00ff41' } };
         Composite.add(world, [
             Bodies.rectangle(190, 0, 380, 40, wallStyle),
@@ -36,87 +36,94 @@
             Bodies.rectangle(330, 570, 180, 50, { isStatic: true, angle: -0.5, ...wallStyle })
         ]);
 
-        // --- BUMPERS (Rebond 0 pour stopper le ping-pong infini) ---
+        // --- BUMPERS ---
         const createBumper = (x, y) => {
-            return Bodies.circle(x, y, 18, { 
-                isStatic: true, label: "bumper", restitution: 0,
-                render: { fillStyle: '#053a10', strokeStyle: '#00ff41', lineWidth: 3 } 
-            });
+            return Bodies.circle(x, y, 18, { isStatic: true, label: "bumper", restitution: 0, render: { fillStyle: '#053a10', strokeStyle: '#00ff41', lineWidth: 3 } });
         };
-        const bumpers = [createBumper(110, 140), createBumper(270, 140), createBumper(190, 240)];
-        Composite.add(world, bumpers);
+        Composite.add(world, [createBumper(110, 140), createBumper(270, 140), createBumper(190, 240)]);
 
         // --- BILLE ---
         let ball = Bodies.circle(190, 50, 11, { density: 0.5, label: "ball", restitution: 0.1 });
         Composite.add(world, ball);
-                // --- FLIPPERS (Pivots recalibrés) ---
+
+        // --- FLIPPERS (Correction des Pivots) ---
         const createFlipper = (x, y, side) => {
             const isLeft = side === 'left';
-            const f = Bodies.rectangle(x, y, 115, 38, { 
+            // On centre le corps sur le pivot pour éviter les tremblements
+            const f = Bodies.rectangle(x, y, 110, 30, { 
                 label: "flipper", 
                 render: { fillStyle: '#00ff41' },
-                chamfer: { radius: 15 }
+                chamfer: { radius: 10 },
+                isStatic: false
             });
+            
+            // Le point B est l'endroit sur le rectangle où l'attache se fait
             const p = Constraint.create({
-                bodyB: f, 
+                bodyB: f,
                 pointB: { x: isLeft ? -45 : 45, y: 0 },
-                pointA: { x: x, y: y }, 
-                stiffness: 1, length: 0, render: { visible: false }
+                pointA: { x: x, y: y },
+                stiffness: 1,
+                length: 0,
+                render: { visible: false }
             });
-            return { body: f, pivot: p, side: side };
+            return { body: f, pivot: p, side: side, pressed: false };
         };
 
-        const leftF = createFlipper(105, 505, 'left');
-        const rightF = createFlipper(275, 505, 'right');
+        const leftF = createFlipper(105, 500, 'left');
+        const rightF = createFlipper(275, 500, 'right');
         Composite.add(world, [leftF.body, leftF.pivot, rightF.body, rightF.pivot]);
 
+        // --- LOGIQUE DE JEU ---
         let score = 0;
         let isGameOver = false;
 
-        // --- COMMANDE DE FRAPPE ---
-        const flip = (f) => {
-            // Force la rotation immédiate
-            Body.setAngularVelocity(f.body, f.side === 'left' ? -0.7 : 0.7);
-        };
-
+        // Gestion des entrées (Touché = Presse, Relâché = Repos)
         window.addEventListener('touchstart', (e) => {
             e.preventDefault();
             const touchX = e.touches[0].clientX;
-            if (touchX < window.innerWidth / 2) flip(leftF);
-            else flip(rightF);
+            if (touchX < window.innerWidth / 2) leftF.pressed = true;
+            else rightF.pressed = true;
         }, { passive: false });
 
-        // --- COLLISIONS : SCORE + EXPULSION VARIÉE ---
+        window.addEventListener('touchend', () => {
+            leftF.pressed = false;
+            rightF.pressed = false;
+        });
+
+        // --- GESTION DES COLLISIONS ---
         Events.on(engine, 'collisionStart', (event) => {
             event.pairs.forEach((pair) => {
                 if (pair.bodyA.label === "bumper" || pair.bodyB.label === "bumper") {
                     const bumper = pair.bodyA.label === "bumper" ? pair.bodyA : pair.bodyB;
                     score += 100;
                     document.getElementById('score').innerText = `SCORE: ${score.toString().padStart(4, '0')}`;
-                    
-                    // Secret : On ajoute un "random" au vecteur pour casser les rebonds infinis
                     const diff = Vector.sub(ball.position, bumper.position);
-                    const randomX = (Math.random() - 0.5) * 4; 
-                    const boost = Vector.mult(Vector.normalise({ x: diff.x + randomX, y: diff.y }), 13);
+                    const boost = Vector.mult(Vector.normalise({ x: diff.x + (Math.random()-0.5)*4, y: diff.y }), 13);
                     Body.setVelocity(ball, boost);
                 }
             });
         });
 
-        // --- BOUCLE PRINCIPALE ---
+        // --- BOUCLE DE MISE À JOUR (C'est ici qu'on force le mouvement) ---
         Events.on(engine, 'beforeUpdate', () => {
-            // Ressort de rappel des flippers (plus nerveux)
-            Body.setAngularVelocity(leftF.body, (0.45 - leftF.body.angle) * 0.3);
-            Body.setAngularVelocity(rightF.body, (-0.45 - rightF.body.angle) * 0.3);
+            const speed = 0.25; // Vitesse de mouvement des flippers
             
-            // Verrouillage des angles
-            if (leftF.body.angle > 0.45) Body.setAngle(leftF.body, 0.45);
-            if (rightF.body.angle < -0.45) Body.setAngle(rightF.body, -0.45);
+            // Logique du Flipper Gauche
+            const leftTarget = leftF.pressed ? -0.5 : 0.5;
+            const leftAngle = leftF.body.angle + (leftTarget - leftF.body.angle) * speed;
+            Body.setAngle(leftF.body, leftAngle);
+            Body.setAngularVelocity(leftF.body, 0); // Empêche les vibrations folles
 
-            // Gestion Perte de balle
+            // Logique du Flipper Droit
+            const rightTarget = rightF.pressed ? 0.5 : -0.5;
+            const rightAngle = rightF.body.angle + (rightTarget - rightF.body.angle) * speed;
+            Body.setAngle(rightF.body, rightAngle);
+            Body.setAngularVelocity(rightF.body, 0);
+
+            // Perte de bille
             if (ball.position.y > 600 && !isGameOver) {
                 isGameOver = true;
-                alert("GAME OVER ! Score : " + score);
+                alert("Score : " + score);
                 score = 0;
                 document.getElementById('score').innerText = "SCORE: 0000";
                 Body.setPosition(ball, { x: 190, y: 50 });
