@@ -108,14 +108,23 @@ Composite.add(world, [
             }
         });
 
-        // --- RÉPULSION FORCÉE (Le secret contre le collage) ---
+                // --- RÉPULSION FORCÉE (ADOUCIE ET DÉVIÉE) ---
         Events.on(engine, 'collisionStart', (event) => {
             event.pairs.forEach((pair) => {
                 if (pair.bodyA.label === "bumper" || pair.bodyB.label === "bumper") {
                     const bumper = pair.bodyA.label === "bumper" ? pair.bodyA : pair.bodyB;
-                    // On calcule la direction pour expulser la bille
+                    
+                    // 1. On calcule la direction de base
                     const diff = Vector.sub(ball.position, bumper.position);
-                    const boost = Vector.mult(Vector.normalise(diff), 15);
+                    const normalized = Vector.normalise(diff);
+                    
+                    // 2. On ajoute une petite déviation aléatoire (X) pour casser les boucles infinies
+                    const randomX = (Math.random() - 0.5) * 0.5;
+                    const finalDir = { x: normalized.x + randomX, y: normalized.y };
+                    
+                    // 3. Force réduite à 10 (au lieu de 15) pour plus de contrôle
+                    const boost = Vector.mult(Vector.normalise(finalDir), 10);
+                    
                     Body.setVelocity(ball, boost);
                 }
             });
