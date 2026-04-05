@@ -6,177 +6,115 @@
     <title>Eagle Pinball One</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
-        body { 
-            margin: 0; 
-            background: #000; 
-            overflow: hidden; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            font-family: 'Courier New', Courier, monospace; 
-            touch-action: none;
-        }
-        #ui-container {
-            width: 100%;
-            max-width: 400px;
-            display: flex;
-            justify-content: space-between;
-            padding: 10px;
-            box-sizing: border-box;
-        }
-        #score { 
-            color: #00ff41; 
-            font-size: 20px; 
-            text-shadow: 0 0 10px #00ff41; 
-        }
-        #status {
-            color: #fff;
-            font-size: 14px;
-            text-transform: uppercase;
-        }
-        canvas { 
-            border: 3px solid #00ff41; 
-            box-shadow: 0 0 25px rgba(0, 255, 65, 0.5); 
-            border-radius: 15px; 
-            background: radial-gradient(circle, #101010 0%, #000 100%);
-        }
-        .arcade-btn {
-            margin-top: 15px;
-            padding: 12px 24px;
-            background: #00ff41;
-            color: #000;
-            border: none;
-            font-weight: bold;
-            border-radius: 5px;
-            cursor: pointer;
-            box-shadow: 0 0 15px #00ff41;
-        }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; flex-direction: column; align-items: center; font-family: 'Courier New', Courier, monospace; touch-action: none; }
+        #ui-container { width: 100%; max-width: 380px; display: flex; justify-content: space-between; padding: 10px; box-sizing: border-box; }
+        #score { color: #00ff41; font-size: 20px; text-shadow: 0 0 10px #00ff41; }
+        canvas { border: 3px solid #00ff41; box-shadow: 0 0 25px rgba(0, 255, 65, 0.5); border-radius: 15px; }
     </style>
 </head>
 <body>
     <div id="ui-container">
         <div id="score">SCORE: 0000</div>
-        <div id="status">Eagle Arcade v1</div>
     </div>
 
     <script>
         const { Engine, Render, Runner, Bodies, Composite, Constraint, Events, Body } = Matter;
-
-        // --- CONFIGURATION ---
-        const WALLET_DESTINATION = "0x872bD846596Cc1aEde8Fd800997d242e3473fA83";
         const engine = Engine.create();
         const world = engine.world;
-        world.gravity.y = 1.6; // Gravité lourde pour le réalisme
+        world.gravity.y = 1.5;
 
         const render = Render.create({
             element: document.body,
             engine: engine,
-            options: { 
-                width: 380, 
-                height: 580, 
-                wireframes: false, 
-                background: 'transparent' 
-            }
+            options: { width: 380, height: 580, wireframes: false, background: '#050505' }
         });
 
-        // --- STRUCTURE DU PLATEAU (Néon) ---
+        // MURS ET STRUCTURE
         const wallStyle = { isStatic: true, render: { fillStyle: '#00ff41' } };
-        const walls = [
-            Bodies.rectangle(190, 0, 380, 20, wallStyle), // Haut
-            Bodies.rectangle(0, 290, 20, 580, wallStyle),   // Gauche
-            Bodies.rectangle(380, 290, 20, 580, wallStyle),  // Droite
-            // Entonnoir vers les flippers
-            Bodies.rectangle(50, 550, 140, 20, { isStatic: true, angle: 0.6, render: { fillStyle: '#00ff41' } }),
-            Bodies.rectangle(330, 550, 140, 20, { isStatic: true, angle: -0.6, render: { fillStyle: '#00ff41' } })
-        ];
-        Composite.add(world, walls);
+        Composite.add(world, [
+            Bodies.rectangle(190, 0, 380, 20, wallStyle),
+            Bodies.rectangle(0, 290, 20, 580, wallStyle),
+            Bodies.rectangle(380, 290, 20, 580, wallStyle),
+            // Rampes du bas (entonnoir)
+            Bodies.rectangle(55, 560, 150, 20, { isStatic: true, angle: 0.5, render: { fillStyle: '#00ff41' } }),
+            Bodies.rectangle(325, 560, 150, 20, { isStatic: true, angle: -0.5, render: { fillStyle: '#00ff41' } })
+        ]);
 
-        // --- BUMPERS ÉLECTRIQUES ---
+        // BUMPERS (CIBLES)
         const createBumper = (x, y) => {
-            let b = Bodies.circle(x, y, 22, { 
-                isStatic: true, 
-                restitution: 2.0, // Rebond violent
-                render: { fillStyle: '#053a10', strokeStyle: '#00ff41', lineWidth: 4 } 
-            });
+            let b = Bodies.circle(x, y, 22, { isStatic: true, restitution: 2.2, render: { fillStyle: '#053a10', strokeStyle: '#00ff41', lineWidth: 3 } });
             b.label = "bumper";
             return b;
         };
-        const bumpers = [createBumper(110, 140), createBumper(270, 140), createBumper(190, 240)];
-        Composite.add(world, bumpers);
+        Composite.add(world, [createBumper(110, 140), createBumper(270, 140), createBumper(190, 240)]);
 
-        // --- LA BILLE D'ACIER ---
-        const ball = Bodies.circle(200, 40, 11, { 
-            restitution: 0.4, 
-            friction: 0.002, 
-            density: 0.06, // Poids important
-            render: { fillStyle: '#fff', strokeStyle: '#00ff41', lineWidth: 2 } 
-        });
+        // LA BILLE
+        const ball = Bodies.circle(190, 50, 11, { restitution: 0.5, friction: 0.005, density: 0.05, render: { fillStyle: '#fff' } });
         Composite.add(world, ball);
+                // --- LES FLIPPERS AMÉLIORÉS ---
+        const createFlipper = (x, y, side) => {
+            const isLeft = side === 'left';
+            const flipper = Bodies.rectangle(x, y, 95, 22, { 
+                chamfer: { radius: 10 },
+                render: { fillStyle: '#00ff41' },
+                label: 'flipper'
+            });
 
-        // --- LES FLIPPERS AMÉLIORÉS ---
-const createFlipper = (x, y, side) => {
-    const isLeft = side === 'left';
-    const group = Body.nextGroup(true);
-    
-    // On allonge un peu la palette pour mieux attraper la balle
-    const flipper = Bodies.rectangle(x, y, 90, 20, { 
-        collisionFilter: { group: group },
-        chamfer: { radius: 10 },
-        render: { fillStyle: '#00ff41' },
-        label: 'flipper'
-    });
+            const pivot = Constraint.create({
+                bodyB: flipper, 
+                pointB: { x: isLeft ? -42 : 42, y: 0 },
+                pointA: { x: x, y: y }, 
+                stiffness: 1, length: 0, render: { visible: false }
+            });
+            return { body: flipper, pivot: pivot, side: side };
+        };
 
-    const pivot = Constraint.create({
-        bodyB: flipper, 
-        pointB: { x: isLeft ? -40 : 40, y: 0 },
-        pointA: { x: x, y: y }, 
-        stiffness: 1, 
-        length: 0,
-        render: { visible: false }
-    });
+        const leftF = createFlipper(125, 520, 'left');
+        const rightF = createFlipper(255, 520, 'right');
+        Composite.add(world, [leftF.body, leftF.pivot, rightF.body, rightF.pivot]);
 
-    // BUTÉES : Pour empêcher le flipper de monter trop haut ou descendre trop bas
-    const limit = Bodies.circle(x, y, 1, { isStatic: true, render: { visible: false } });
+        // --- MÉCANIQUE DE FRAPPE ---
+        const flip = (f) => {
+            const force = f.side === 'left' ? -0.22 : 0.22;
+            Body.applyForce(f.body, 
+                { x: f.body.position.x + (f.side === 'left' ? 45 : -45), y: f.body.position.y },
+                { x: 0, y: force }
+            );
+        };
 
-    return { body: flipper, pivot: pivot, side: side };
-};
+        window.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touchX = e.touches[0].clientX;
+            if (touchX < window.innerWidth / 2) flip(leftF);
+            else flip(rightF);
+        }, { passive: false });
 
-const leftF = createFlipper(120, 520, 'left');
-const rightF = createFlipper(260, 520, 'right');
-Composite.add(world, [leftF.body, leftF.pivot, rightF.body, rightF.pivot]);
+        // GESTION DES ANGLES ET RESSORTS (ANTI-FANTÔME)
+        Events.on(engine, 'beforeUpdate', () => {
+            // Gauche
+            if (leftF.body.angle > 0.3) Body.setAngle(leftF.body, 0.3);
+            if (leftF.body.angle < -0.6) Body.setAngle(leftF.body, -0.6);
+            Body.setAngularVelocity(leftF.body, (0.3 - leftF.body.angle) * 0.15);
 
-// --- LE SECRET DE LA FRAPPE (FORCE BRUTE) ---
-const flip = (f) => {
-    const force = f.side === 'left' ? -0.15 : 0.15;
-    // On applique une force vers le haut sur le bout de la palette
-    Body.applyForce(f.body, 
-        { x: f.body.position.x + (f.side === 'left' ? 40 : -40), y: f.body.position.y },
-        { x: 0, y: force }
-    );
-};
+            // Droite
+            if (rightF.body.angle < -0.3) Body.setAngle(rightF.body, -0.3);
+            if (rightF.body.angle > 0.6) Body.setAngle(rightF.body, 0.6);
+            Body.setAngularVelocity(rightF.body, (-0.3 - rightF.body.angle) * 0.15);
+        });
 
-// --- CONTRÔLES TACTILES RÉACTIFS ---
-window.addEventListener('touchstart', (e) => {
-    e.preventDefault(); // Empêche le scroll
-    const touchX = e.touches[0].clientX;
-    const screenWidth = window.innerWidth;
-    
-    if (touchX < screenWidth / 2) flip(leftF);
-    else flip(rightF);
-}, { passive: false });
+        // SYSTÈME DE SCORE
+        let score = 0;
+        Events.on(engine, 'collisionStart', (event) => {
+            event.pairs.forEach((pair) => {
+                if (pair.bodyA.label === "bumper" || pair.bodyB.label === "bumper") {
+                    score += 100;
+                    document.getElementById('score').innerText = `SCORE: ${score.toString().padStart(4, '0')}`;
+                }
+            });
+        });
 
-// Retour auto à la position initiale (Ressort)
-Events.on(engine, 'beforeUpdate', () => {
-    // Ressort pour le flipper gauche
-    if (leftF.body.angle > 0.3) Body.setAngle(leftF.body, 0.3);
-    if (leftF.body.angle < -0.5) Body.setAngle(leftF.body, -0.5);
-    Body.setAngularVelocity(leftF.body, (0.3 - leftF.body.angle) * 0.1);
-
-    // Ressort pour le flipper droit
-    if (rightF.body.angle < -0.3) Body.setAngle(rightF.body, -0.3);
-    if (rightF.body.angle > 0.5) Body.setAngle(rightF.body, 0.5);
-    Body.setAngularVelocity(rightF.body, (-0.3 - rightF.body.angle) * 0.1);
-});
+        Render.run(render);
+        Runner.run(Runner.create(), engine);
     </script>
 </body>
-  </html>
+</html>
