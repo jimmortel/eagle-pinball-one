@@ -37,25 +37,26 @@
             Bodies.rectangle(330, 570, 160, 45, { isStatic: true, angle: -0.5, render: { fillStyle: '#00ff41' } })
         ]);
 
-        // BUMPERS (Taille 15 = plus d'espace pour descendre)
+                // --- BUMPERS RE-POSITIONNÉS ---
         const createBumper = (x, y) => {
-            let b = Bodies.circle(x, y, 15, { isStatic: true, restitution: 1.5, render: { fillStyle: '#053a10', strokeStyle: '#00ff41', lineWidth: 3 } });
-            b.label = "bumper";
-            return b;
+            return Bodies.circle(x, y, 15, { 
+                isStatic: true, 
+                restitution: 1.2, 
+                render: { fillStyle: '#053a10', strokeStyle: '#00ff41', lineWidth: 3 },
+                label: 'bumper'
+            });
         };
-        Composite.add(world, [createBumper(120, 150), createBumper(260, 150), createBumper(190, 280)]);
 
-        // LA BILLE (Lourde pour traverser les bugs)
+        // Positions qui laissent passer la balle sur les côtés
+        Composite.add(world, [
+            createBumper(110, 130), 
+            createBumper(270, 130), 
+            createBumper(190, 230) // Bumper central remonté
+        ]);
+
+        // LA BILLE
         let ball = Bodies.circle(190, 50, 12, { restitution: 0.4, friction: 0, density: 0.1, label: "ball" });
         Composite.add(world, ball);
-Composite.add(world, [
-    Bodies.rectangle(190, 0, 380, 20, wallStyle), 
-    Bodies.rectangle(0, 290, 20, 580, wallStyle),   
-    Bodies.rectangle(380, 290, 20, 580, wallStyle),  
-    // Rampes plus lisses pour guider la balle
-    Bodies.rectangle(50, 570, 160, 40, { isStatic: true, angle: 0.5, render: { fillStyle: '#00ff41' } }),
-    Bodies.rectangle(330, 570, 160, 40, { isStatic: true, angle: -0.5, render: { fillStyle: '#00ff41' } })
-]);
 
                 // --- FLIPPERS XXL (Bouchent les trous et anti-traversée) ---
         const createFlipper = (x, y, side) => {
