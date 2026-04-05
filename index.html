@@ -58,14 +58,12 @@
         let ball = Bodies.circle(190, 50, 12, { restitution: 0.4, friction: 0, density: 0.1, label: "ball" });
         Composite.add(world, ball);
 
-                // --- FLIPPERS XXL (Bouchent les trous et anti-traversée) ---
+                        // --- FLIPPERS XXL (Anti-traversée et Fermeture du bas) ---
         const createFlipper = (x, y, side) => {
             const isLeft = side === 'left';
-            // On passe à 120 de longueur et 40 d'épaisseur pour être imbattable
             const flipper = Bodies.rectangle(x, y, 120, 40, { 
                 chamfer: { radius: 15 }, 
-                render: { fillStyle: '#00ff41' },
-                label: 'flipper'
+                render: { fillStyle: '#00ff41' }
             });
 
             const pivot = Constraint.create({
@@ -77,21 +75,13 @@
             return { body: flipper, pivot: pivot, side: side };
         };
 
-        // Positions resserrées pour ne laisser que 80px de vide au centre
         const leftF = createFlipper(90, 510, 'left');
         const rightF = createFlipper(290, 510, 'right');
         Composite.add(world, [leftF.body, leftF.pivot, rightF.body, rightF.pivot]);
 
-        // --- ZONE DE RÉCUPÉRATION (Le filet de sécurité) ---
-        // Si la balle tombe vraiment, elle réapparaît en haut après 1 seconde
-        const resetBall = () => {
-            Body.setPosition(ball, { x: 190, y: 50 });
-            Body.setVelocity(ball, { x: 0, y: 0 });
-        };
-
-        // --- LOGIQUE DE FRAPPE ---
+        // --- MÉCANIQUE DE FRAPPE ---
         const flip = (f) => {
-            const force = -1.5; // Force de frappe pro
+            const force = -1.6; // Puissance pro
             const offset = f.side === 'left' ? 60 : -60;
             Body.applyForce(f.body, { x: f.body.position.x + offset, y: f.body.position.y }, { x: 0, y: force });
         };
@@ -103,26 +93,33 @@
             else flip(rightF);
         }, { passive: false });
 
-        // --- BOUCLE DE MISE À JOUR ---
+        // --- GESTION DES ANGLES ET RESET ---
         Events.on(engine, 'beforeUpdate', () => {
-            // Retour des flippers plus ferme
+            // Retour rapide en position basse
             Body.setAngularVelocity(leftF.body, (0.4 - leftF.body.angle) * 0.4);
             Body.setAngularVelocity(rightF.body, (-0.4 - rightF.body.angle) * 0.4);
             
             if (leftF.body.angle > 0.4) Body.setAngle(leftF.body, 0.4);
             if (rightF.body.angle < -0.4) Body.setAngle(rightF.body, -0.4);
 
-            // Sécurité anti-perte : si la bille sort de l'écran
-            if (ball.position.y > 600) resetBall();
+            // AUTO-RESET : Si la bille tombe, elle revient en haut
+            if (ball.position.y > 600) {
+                Body.setPosition(ball, { x: 190, y: 50 });
+                Body.setVelocity(ball, { x: 0, y: 0 });
+            }
         });
 
-        // --- COLLISIONS ---
+        // --- RÉPULSION BUMPERS (Casse les boucles infinies) ---
         Events.on(engine, 'collisionStart', (event) => {
             event.pairs.forEach((pair) => {
                 if (pair.bodyA.label === "bumper" || pair.bodyB.label === "bumper") {
                     const bumper = pair.bodyA.label === "bumper" ? pair.bodyA : pair.bodyB;
                     const diff = Vector.sub(ball.position, bumper.position);
-                    const boost = Vector.mult(Vector.normalise(diff), 12);
+                    
+                    // On force une déviation latérale aléatoire
+                    const drift = (Math.random() > 0.5 ? 0.7 : -0.7);
+                    const boost = Vector.mult(Vector.normalise({ x: diff.x + drift, y: diff.y }), 12);
+                    
                     Body.setVelocity(ball, boost);
                 }
             });
